@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Django
+backend/db.sqlite3
+backend/db.sqlite3-journal
+backend/media/
+backend/staticfiles/
+
+# Node / frontend
+node_modules/
+frontend/dist/
+.vite/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Firmware secrets (WiFi creds + device key)
+firmware/**/config.h
+
+# Editors / OS
+.idea/
+.vscode/
+*.log
+.DS_Store
+Thumbs.db

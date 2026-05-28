@@ -1,0 +1,56 @@
+services:
+  backend:
+    build: ./backend
+    image: ocr-backend:latest
+    environment:
+      DEBUG: "False"
+      SECRET_KEY: "local-dev-secret-change-me"
+      ALLOWED_HOSTS: "*"
+      PORT: "8000"
+      GUNICORN_WORKERS: "2"
+      GUNICORN_THREADS: "4"
+      MEDIA_ROOT: "/app/media"
+      # Persist the SQLite DB on a volume so registered data survives rebuilds.
+      SQLITE_PATH: "/app/data/db.sqlite3"
+      # Behind Cloudflare Tunnel / a TLS proxy: trust the forwarded HTTPS scheme and
+      # trust the public hostname for Django admin's CSRF check. Set the hostname below.
+      TRUST_PROXY_HTTPS: "True"
+      CSRF_TRUSTED_ORIGINS: "https://api.yourdomain.com"
+      # Seed credentials for the first `seed_data` run (change in production).
+      SEED_ADMIN_USER: "admin"
+      SEED_ADMIN_PASSWORD: "admin12345"
+    volumes:
+      - media:/app/media
+      - data:/app/data
+    expose:
+      - "8000"
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # The frontend is hosted on Vercel for this deployment, so you don't need this
+  # service on the VM — run `docker compose up -d backend`. It's kept here for the
+  # all-in-one self-hosted option (`docker compose up`), where nginx serves the SPA
+  # and proxies /api + /media to the backend.
+  frontend:
+    build: ./frontend
+    image: ocr-frontend:latest
+    environment:
+      PORT: "80"
+      BACKEND_URL: "http://backend:8000"
+    ports:
+      - "5173:80"
+    depends_on:
+      backend:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  media:
+  data:

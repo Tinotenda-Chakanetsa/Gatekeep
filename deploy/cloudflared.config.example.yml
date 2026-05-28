@@ -1,0 +1,41 @@
+# Cloudflare Tunnel config for the Gatekeeper backend.
+# The VM has only a private IP (10.50.100.57), so a tunnel exposes the backend on a
+# public HTTPS hostname without a public IP, port-forwarding, or inbound firewall rules.
+# cloudflared makes an OUTBOUND connection to Cloudflare; TLS is terminated by Cloudflare.
+#
+# Both the Vercel dashboard (via /api + /media rewrites) and the remote ESP32-CAM
+# reach the backend through the hostname below.
+#
+# ---- One-time setup on the Ubuntu VM ----
+#   1. Install cloudflared:
+#        curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
+#        sudo dpkg -i cloudflared.deb
+#   2. Authenticate (opens a browser link; pick the domain you manage in Cloudflare):
+#        cloudflared tunnel login
+#   3. Create the tunnel (note the UUID it prints):
+#        cloudflared tunnel create gatekeeper
+#   4. Copy this file to /etc/cloudflared/config.yml and fill in the UUID + hostname.
+#   5. Point DNS at the tunnel:
+#        cloudflared tunnel route dns gatekeeper api.yourdomain.com
+#   6. Run it as a service so it survives reboots:
+#        sudo cloudflared service install
+#        sudo systemctl enable --now cloudflared
+#
+# After this, https://api.yourdomain.com -> http://localhost:8000 on the VM.
+# Remember to update:
+#   - frontend/vercel.json            (rewrite destinations -> https://api.yourdomain.com)
+#   - docker-compose.yml              (CSRF_TRUSTED_ORIGINS -> https://api.yourdomain.com)
+#   - firmware/.../config.h           (SERVER_BASE_URL -> https://api.yourdomain.com)
+
+tunnel: REPLACE_WITH_TUNNEL_UUID
+credentials-file: /etc/cloudflared/REPLACE_WITH_TUNNEL_UUID.json
+
+ingress:
+  - hostname: api.yourdomain.com
+    service: http://localhost:8000
+    originRequest:
+      # The backend can stream large capture uploads + slow first-request model warmup.
+      connectTimeout: 30s
+      noTLSVerify: true
+  # Catch-all: anything not matched above returns 404.
+  - service: http_status:404

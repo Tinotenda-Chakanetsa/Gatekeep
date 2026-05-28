@@ -1,0 +1,32 @@
+// Copy this file to `config.h` and fill in your values. config.h is git-ignored.
+
+// ---- WiFi ----
+#define WIFI_SSID      "your-wifi-name"
+#define WIFI_PASSWORD  "your-wifi-password"
+
+// ---- Backend ----
+// Base URL of the Django backend reachable from the ESP32 (no trailing slash).
+// Remote gate (different network from the server): use the public HTTPS tunnel
+// hostname, e.g. https://api.yourdomain.com  (uses WiFiClientSecure in the sketch).
+// Same LAN as the server instead: use http://<vm-lan-ip>:8000 and switch the sketch
+// from WiFiClientSecure to a plain WiFiClient.
+#define SERVER_BASE_URL "https://api.yourdomain.com"
+
+// Device API key — create a device in the dashboard (Devices page) and paste its key here.
+#define DEVICE_API_KEY  "paste-device-api-key-here"
+
+// "entry" or "exit" — which side of the gate this camera watches.
+#define GATE_DIRECTION  "entry"
+
+// ---- Pins (AI-Thinker ESP32-CAM) ----
+// Free GPIOs on the AI-Thinker board are scarce. These two are safe when the
+// microSD slot is unused. Drive the gate through a relay or an externally-powered
+// servo — do NOT power a servo straight off the board's 3V3 rail.
+#define PIR_PIN          13   // motion sensor OUT (HC-SR501) — or ultrasonic trigger logic
+#define GATE_RELAY_PIN   12   // relay IN (active HIGH opens the gate)
+#define STATUS_LED_PIN    4   // on-board flash LED (also usable as a status blink)
+
+// ---- Behaviour ----
+#define GATE_OPEN_MS         5000   // how long to hold the gate open after a grant
+#define MOTION_COOLDOWN_MS   8000   // ignore repeat triggers for this long after a capture
+#define COMMAND_POLL_MS      3000   // how often to poll the backend for a manual-open command
