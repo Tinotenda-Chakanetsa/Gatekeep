@@ -16,6 +16,8 @@ services:
       # trust the public hostname for Django admin's CSRF check. Set the hostname below.
       TRUST_PROXY_HTTPS: "True"
       CSRF_TRUSTED_ORIGINS: "https://user-hvm-domu.taile2f0da.ts.net"
+      # The Vercel-hosted SPA calls this backend cross-origin, so allow its origin.
+      CORS_ALLOWED_ORIGINS: "https://gatekeep-kappa.vercel.app"
       # Seed credentials for the first `seed_data` run (change in production).
       SEED_ADMIN_USER: "admin"
       SEED_ADMIN_PASSWORD: "admin12345"

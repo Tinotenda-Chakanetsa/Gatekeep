@@ -1,11 +1,11 @@
 const ACCESS_KEY = 'gate_access';
 const REFRESH_KEY = 'gate_refresh';
 
-// All backend calls go through this prefix, which each environment maps to the Django
-// backend: the Vite dev proxy (/be -> :8000), the Vercel rewrite (/be/* -> Funnel URL),
-// and nginx (/be/ -> backend). We avoid calling the literal /api path from the browser
-// because Vercel reserves /api for its own serverless functions and 404s it.
-export const API_BASE = '/be';
+// Base URL of the Django backend. Empty in local dev + the nginx all-in-one build, where
+// relative paths go through a same-origin proxy. On Vercel it's set to the public backend
+// URL (VITE_API_BASE_URL) so the browser calls the backend directly — Vercel reserves any
+// request path containing "/api", which breaks proxying the API through a rewrite.
+export const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
 
 export function mediaUrl(path) {
   return path && path.startsWith('/') ? `${API_BASE}${path}` : path;
