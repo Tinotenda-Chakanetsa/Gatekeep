@@ -1,8 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
-    { "source": "/api/:path*", "destination": "https://user-hvm-domu.taile2f0da.ts.net/api/:path*" },
-    { "source": "/media/:path*", "destination": "https://user-hvm-domu.taile2f0da.ts.net/media/:path*" },
+    { "source": "/be/:path*", "destination": "https://user-hvm-domu.taile2f0da.ts.net/:path*" },
     { "source": "/:path*", "destination": "/index.html" }
   ]
 }

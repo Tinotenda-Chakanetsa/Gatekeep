@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { API_BASE } from '../lib/api.js';
 import { PageHeader, formatScore } from '../components/ui.jsx';
 
 export default function OcrTester() {
@@ -36,7 +37,7 @@ export default function OcrTester() {
     setError('');
     setResult(null);
     try {
-      const res = await fetch('/api/ocr/', { method: 'POST', body: data });
+      const res = await fetch(`${API_BASE}/api/ocr/`, { method: 'POST', body: data });
       const json = await res.json();
       if (!res.ok) throw new Error(json.details || json.error || 'OCR failed.');
       setResult(json);

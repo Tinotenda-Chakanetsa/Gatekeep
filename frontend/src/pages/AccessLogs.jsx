@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api } from '../lib/api.js';
+import { api, mediaUrl } from '../lib/api.js';
 import { DecisionBadge, PageHeader, formatScore, formatTime } from '../components/ui.jsx';
 
 const FILTERS = [
@@ -90,10 +90,10 @@ export default function AccessLogs() {
                       <td>
                         {log.image_url ? (
                           <img
-                            src={log.image_url}
+                            src={mediaUrl(log.image_url)}
                             alt="capture"
                             className="thumb clickable"
-                            onClick={() => setPreview(log.image_url)}
+                            onClick={() => setPreview(mediaUrl(log.image_url))}
                           />
                         ) : (
                           <span className="muted-copy">—</span>

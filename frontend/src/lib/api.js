@@ -1,6 +1,16 @@
 const ACCESS_KEY = 'gate_access';
 const REFRESH_KEY = 'gate_refresh';
 
+// All backend calls go through this prefix, which each environment maps to the Django
+// backend: the Vite dev proxy (/be -> :8000), the Vercel rewrite (/be/* -> Funnel URL),
+// and nginx (/be/ -> backend). We avoid calling the literal /api path from the browser
+// because Vercel reserves /api for its own serverless functions and 404s it.
+export const API_BASE = '/be';
+
+export function mediaUrl(path) {
+  return path && path.startsWith('/') ? `${API_BASE}${path}` : path;
+}
+
 export const tokens = {
   get access() {
     return localStorage.getItem(ACCESS_KEY) || '';
@@ -29,7 +39,7 @@ class ApiError extends Error {
 async function refreshAccess() {
   const refresh = tokens.refresh;
   if (!refresh) return false;
-  const res = await fetch('/api/auth/refresh/', {
+  const res = await fetch(`${API_BASE}/api/auth/refresh/`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ refresh }),
@@ -50,7 +60,7 @@ function buildHeaders(extra, hasBody, isForm) {
 
 async function request(path, { method = 'GET', body, isForm = false, _retried = false } = {}) {
   const hasBody = body !== undefined && body !== null;
-  const res = await fetch(path, {
+  const res = await fetch(`${API_BASE}${path}`, {
     method,
     headers: buildHeaders({}, hasBody, isForm),
     body: hasBody ? (isForm ? body : JSON.stringify(body)) : undefined,
@@ -82,7 +92,7 @@ export const api = {
 };
 
 export async function login(username, password) {
-  const res = await fetch('/api/auth/login/', {
+  const res = await fetch(`${API_BASE}/api/auth/login/`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, password }),

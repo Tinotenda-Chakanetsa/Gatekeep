@@ -6,13 +6,11 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': {
+      // Frontend calls everything under /be; strip it and forward to the Django backend.
+      '/be': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
-      },
-      '/media': {
-        target: 'http://127.0.0.1:8000',
-        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/be/, ''),
       },
     },
   },

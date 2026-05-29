@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api } from '../lib/api.js';
+import { api, mediaUrl } from '../lib/api.js';
 import { DecisionBadge, PageHeader, formatTime } from '../components/ui.jsx';
 
 function MetricCard({ label, value, hint, tone = 'neutral' }) {
@@ -131,7 +131,7 @@ export default function Dashboard() {
                       <td>{formatTime(log.created_at)}</td>
                       <td>
                         {log.image_url ? (
-                          <img src={log.image_url} alt="capture" className="thumb" />
+                          <img src={mediaUrl(log.image_url)} alt="capture" className="thumb" />
                         ) : (
                           <span className="muted-copy">—</span>
                         )}
