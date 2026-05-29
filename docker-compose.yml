@@ -15,7 +15,7 @@ services:
       # Behind Cloudflare Tunnel / a TLS proxy: trust the forwarded HTTPS scheme and
       # trust the public hostname for Django admin's CSRF check. Set the hostname below.
       TRUST_PROXY_HTTPS: "True"
-      CSRF_TRUSTED_ORIGINS: "https://api.yourdomain.com"
+      CSRF_TRUSTED_ORIGINS: "https://user-hvm-domu.taile2f0da.ts.net"
       # Seed credentials for the first `seed_data` run (change in production).
       SEED_ADMIN_USER: "admin"
       SEED_ADMIN_PASSWORD: "admin12345"
