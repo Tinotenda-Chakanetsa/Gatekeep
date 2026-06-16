@@ -41,10 +41,15 @@ def run_ocr(request):
                 'filename': uploaded_file.name,
                 'plate_detected': result['plate_detected'],
                 'selected_text': result['selected_text'],
+                'selected_source': result.get('selected_source'),
                 'joined_text': result['ocr']['joined_text'],
                 'items': result['ocr']['items'],
                 'average_score': result['ocr']['average_score'],
                 'item_count': result['ocr']['item_count'],
+                'readers': {
+                    'paddle': result['ocr'].get('paddle'),
+                    'char_detector': result['ocr'].get('char_detector'),
+                },
                 'detection': result['detection'],
             }
         )

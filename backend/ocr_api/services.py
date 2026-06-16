@@ -18,6 +18,7 @@ from ultralytics import YOLO
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_YOLO_MODEL_PATH = PROJECT_ROOT / 'models' / 'license_plate_detector.pt'
+DEFAULT_CHAR_MODEL_PATH = PROJECT_ROOT / 'models' / 'plate_char_detector.pt'
 PLATE_CLASS_HINTS = {
     'license_plate',
     'licence_plate',
@@ -48,6 +49,20 @@ def get_plate_detector() -> YOLO:
             'YOLO plate detector model was not found. '
             f'Expected a local model at "{model_path}" or set YOLO_MODEL_PATH to your trained plate model.'
         )
+    return YOLO(str(model_path))
+
+
+@lru_cache(maxsize=1)
+def get_char_detector() -> YOLO | None:
+    """Optional second-stage YOLO that detects A-Z/0-9 *characters* on a plate crop.
+
+    Returns None when the model file is absent so the backend keeps booting in
+    Paddle-only mode. Train the weights with the Colab notebook in
+    ``Lisence plate detector prototype/char_detector_trainer_package``.
+    """
+    model_path = Path(os.environ.get('CHAR_OCR_MODEL_PATH', str(DEFAULT_CHAR_MODEL_PATH))).expanduser()
+    if not model_path.exists():
+        return None
     return YOLO(str(model_path))
 
 
@@ -147,6 +162,71 @@ def should_return_preprocessed_crop() -> bool:
 @lru_cache(maxsize=1)
 def should_force_single_plate() -> bool:
     return os.environ.get('YOLO_FORCE_SINGLE_PLATE', '1').strip().lower() not in {'0', 'false', 'no'}
+
+
+@lru_cache(maxsize=1)
+def get_preprocess_mode() -> str:
+    """'color' (default, new) preserves colour and CLAHE-normalises luminance.
+
+    'legacy' keeps the original greyscale+auto-invert+upscale pipeline.
+    Custom Zimbabwe plates (government, diplomatic, personalised) read better
+    in colour mode because the auto-invert step destroys the colour cue and
+    forces PaddleOCR to read a stylised font on a now-unfamiliar inverted bg.
+    """
+    raw = os.environ.get('OCR_PREPROCESS_MODE', 'color').strip().lower()
+    return raw if raw in {'color', 'colour', 'legacy'} else 'color'
+
+
+@lru_cache(maxsize=1)
+def get_clahe_clip_limit() -> float:
+    raw_value = os.environ.get('OCR_CLAHE_CLIP_LIMIT', '2.0')
+    try:
+        return max(float(raw_value), 0.5)
+    except ValueError as exc:
+        raise ValueError('OCR_CLAHE_CLIP_LIMIT must be a valid float.') from exc
+
+
+@lru_cache(maxsize=1)
+def get_char_detector_confidence() -> float:
+    raw_value = os.environ.get('CHAR_OCR_CONFIDENCE', '0.25')
+    try:
+        parsed = float(raw_value)
+    except ValueError as exc:
+        raise ValueError('CHAR_OCR_CONFIDENCE must be a valid float.') from exc
+    return min(max(parsed, 0.0), 1.0)
+
+
+@lru_cache(maxsize=1)
+def get_char_detector_max_chars() -> int:
+    raw_value = os.environ.get('CHAR_OCR_MAX_CHARS', '24')
+    try:
+        return max(int(raw_value), 1)
+    except ValueError as exc:
+        raise ValueError('CHAR_OCR_MAX_CHARS must be a valid integer.') from exc
+
+
+@lru_cache(maxsize=1)
+def get_char_row_tolerance_ratio() -> float:
+    """Two char boxes belong to the same row when their y-centres differ by
+    less than this fraction of their average height. Multi-line plates (e.g.
+    motorbike-style) get split into rows top-to-bottom."""
+    raw_value = os.environ.get('CHAR_OCR_ROW_TOLERANCE', '0.5')
+    try:
+        return max(float(raw_value), 0.0)
+    except ValueError as exc:
+        raise ValueError('CHAR_OCR_ROW_TOLERANCE must be a valid float.') from exc
+
+
+@lru_cache(maxsize=1)
+def get_char_detector_bias() -> float:
+    """When both readers run, the char detector is preferred if
+    char_score + bias >= paddle_score. The char detector is purpose-built for
+    plate fonts so we tilt the tie-break in its favour by a small margin."""
+    raw_value = os.environ.get('CHAR_OCR_PREFERENCE_BIAS', '0.05')
+    try:
+        return float(raw_value)
+    except ValueError as exc:
+        raise ValueError('CHAR_OCR_PREFERENCE_BIAS must be a valid float.') from exc
 
 
 @lru_cache(maxsize=1)
@@ -342,9 +422,38 @@ def detect_license_plate(image_path: str) -> dict[str, Any]:
     }
 
 
-def preprocess_plate_crop(image: Image.Image) -> Image.Image:
-    processed = image.convert('RGB')
+def _upscale_for_ocr(image: Image.Image) -> Image.Image:
+    scale_factor = get_preprocess_scale_factor()
+    if scale_factor <= 1.0:
+        return image
+    width, height = image.size
+    return image.resize(
+        (
+            min(int(round(width * scale_factor)), get_max_crop_dimension()),
+            min(int(round(height * scale_factor)), get_max_crop_dimension()),
+        ),
+        Image.Resampling.LANCZOS,
+    )
 
+
+def _preprocess_color(image: Image.Image) -> Image.Image:
+    # CLAHE-normalise the luminance channel so contrast is consistent across plates
+    # without losing colour. Keeps coloured / government / diplomatic plates readable.
+    import cv2  # ultralytics already pulls in opencv-python
+    import numpy as np
+
+    arr = np.array(image.convert('RGB'))
+    lab = cv2.cvtColor(arr, cv2.COLOR_RGB2LAB)
+    l_channel, a_channel, b_channel = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=get_clahe_clip_limit(), tileGridSize=(8, 8))
+    l_eq = clahe.apply(l_channel)
+    merged = cv2.merge((l_eq, a_channel, b_channel))
+    normalized = cv2.cvtColor(merged, cv2.COLOR_LAB2RGB)
+    return _upscale_for_ocr(Image.fromarray(normalized))
+
+
+def _preprocess_legacy(image: Image.Image) -> Image.Image:
+    processed = image.convert('RGB')
     if should_use_grayscale_preprocess():
         grayscale = ImageOps.grayscale(processed)
         if should_auto_invert_dark_plate():
@@ -354,20 +463,13 @@ def preprocess_plate_crop(image: Image.Image) -> Image.Image:
             if brightness < get_invert_threshold():
                 grayscale = ImageOps.invert(grayscale)
         processed = grayscale
+    return _upscale_for_ocr(processed)
 
-    scale_factor = get_preprocess_scale_factor()
-    if scale_factor > 1.0:
-        width, height = processed.size
-        resized = processed.resize(
-            (
-                min(int(round(width * scale_factor)), get_max_crop_dimension()),
-                min(int(round(height * scale_factor)), get_max_crop_dimension()),
-            ),
-            Image.Resampling.LANCZOS,
-        )
-        processed = resized
 
-    return processed
+def preprocess_plate_crop(image: Image.Image) -> Image.Image:
+    if get_preprocess_mode() == 'legacy':
+        return _preprocess_legacy(image)
+    return _preprocess_color(image)
 
 
 def extract_text_from_image(image_path: str) -> dict[str, Any]:
@@ -421,23 +523,133 @@ def extract_text_from_image(image_path: str) -> dict[str, Any]:
     }
 
 
+def _empty_reader_result(available: bool = True) -> dict[str, Any]:
+    return {
+        'available': available,
+        'joined_text': '',
+        'items': [],
+        'average_score': None,
+        'item_count': 0,
+    }
+
+
+def extract_text_with_char_detector(image_path: str) -> dict[str, Any]:
+    """Read a plate crop with the YOLO character detector.
+
+    Detects every A-Z/0-9 box, groups them into rows by y-centre proximity (so
+    rare multi-line plates work), sorts each row left-to-right, and
+    concatenates rows top-to-bottom. Format-agnostic by design — works on
+    personalised, government, diplomatic, and standard plates equally.
+    """
+    detector = get_char_detector()
+    if detector is None:
+        return _empty_reader_result(available=False)
+
+    predictions = detector.predict(
+        source=image_path,
+        conf=get_char_detector_confidence(),
+        verbose=False,
+        max_det=get_char_detector_max_chars(),
+    )
+    if not predictions:
+        return _empty_reader_result()
+
+    result = predictions[0]
+    boxes = getattr(result, 'boxes', None)
+    if boxes is None or boxes.xyxy is None or len(boxes.xyxy) == 0:
+        return _empty_reader_result()
+
+    names = getattr(result, 'names', {}) or {}
+    raw_chars: list[dict[str, Any]] = []
+    for xyxy, cls, conf in zip(
+        boxes.xyxy.tolist(),
+        boxes.cls.tolist() if boxes.cls is not None else [],
+        boxes.conf.tolist() if boxes.conf is not None else [],
+    ):
+        char = str(names.get(int(cls), '')).strip().upper()
+        if not char:
+            continue
+        x1, y1, x2, y2 = xyxy
+        raw_chars.append({
+            'char': char,
+            'cx': (x1 + x2) / 2,
+            'cy': (y1 + y2) / 2,
+            'h': max(y2 - y1, 1.0),
+            'conf': float(conf),
+            'bbox': [round(x1, 1), round(y1, 1), round(x2, 1), round(y2, 1)],
+        })
+
+    if not raw_chars:
+        return _empty_reader_result()
+
+    # Group into rows top-to-bottom.
+    raw_chars.sort(key=lambda r: r['cy'])
+    row_tolerance = get_char_row_tolerance_ratio()
+    rows: list[dict[str, Any]] = []
+    for char_info in raw_chars:
+        if rows:
+            last = rows[-1]
+            tolerance = row_tolerance * max(char_info['h'], last['h_avg'])
+            if abs(char_info['cy'] - last['cy_avg']) <= tolerance:
+                last['items'].append(char_info)
+                items = last['items']
+                last['cy_avg'] = sum(it['cy'] for it in items) / len(items)
+                last['h_avg'] = sum(it['h'] for it in items) / len(items)
+                continue
+        rows.append({'items': [char_info], 'cy_avg': char_info['cy'], 'h_avg': char_info['h']})
+
+    parts: list[str] = []
+    items_out: list[dict[str, Any]] = []
+    for row in rows:
+        row['items'].sort(key=lambda r: r['cx'])
+        parts.append(''.join(r['char'] for r in row['items']))
+        for char_info in row['items']:
+            items_out.append({
+                'text': char_info['char'],
+                'score': char_info['conf'],
+                'bbox': char_info['bbox'],
+            })
+
+    joined = ''.join(parts)
+    average = (sum(it['score'] for it in items_out) / len(items_out)) if items_out else None
+
+    return {
+        'available': True,
+        'joined_text': joined,
+        'items': items_out,
+        'average_score': average,
+        'item_count': len(items_out),
+    }
+
+
+def _write_temp_image(image: Image.Image) -> str:
+    import tempfile
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as temp_file:
+        image.save(temp_file, format=_image_jpeg_format(), quality=get_output_image_quality())
+        return temp_file.name
+
+
 def detect_plate_and_extract_text(image_path: str) -> dict[str, Any]:
     detection_result = detect_license_plate(image_path)
     if not detection_result['detected']:
         return {
             'plate_detected': False,
             'selected_text': '',
+            'selected_source': None,
             'ocr': {
                 'joined_text': '',
                 'items': [],
                 'average_score': None,
                 'item_count': 0,
+                'paddle': _empty_reader_result(),
+                'char_detector': _empty_reader_result(available=get_char_detector() is not None),
             },
             'detection': {
                 'message': detection_result['message'],
                 'selected_box': None,
                 'candidate_boxes': [],
                 'crop_image_base64': None,
+                'preprocessed_crop_image_base64': None,
                 'annotated_image_base64': None,
             },
         }
@@ -445,29 +657,54 @@ def detect_plate_and_extract_text(image_path: str) -> dict[str, Any]:
     crop = detection_result['crop']
     processed_crop = preprocess_plate_crop(crop)
 
-    with io.BytesIO() as buffer:
-        processed_crop.save(buffer, format=_image_jpeg_format(), quality=get_output_image_quality())
-        buffer.seek(0)
-        with Image.open(buffer) as normalized_crop:
-            temp_input = io.BytesIO()
-            normalized_crop.save(temp_input, format=_image_jpeg_format(), quality=get_output_image_quality())
-            temp_input.seek(0)
-            # PaddleOCR expects a file path, so persist a small temporary file.
-            import tempfile
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as temp_file:
-                temp_file.write(temp_input.read())
-                temp_file_path = temp_file.name
+    # Paddle reads the contrast-normalised crop (its strength is clean printed text).
+    # Char detector reads the *original colour* crop because it was trained on coloured
+    # plates and CLAHE-shifted hues would push it off-distribution.
+    color_temp = _write_temp_image(crop)
+    paddle_temp = _write_temp_image(processed_crop)
 
+    paddle_result: dict[str, Any] = _empty_reader_result()
+    char_result: dict[str, Any] = _empty_reader_result(available=False)
     try:
-        ocr_result = extract_text_from_image(temp_file_path)
+        paddle_raw = extract_text_from_image(paddle_temp)
+        paddle_result = {'available': True, **paddle_raw}
+        char_result = extract_text_with_char_detector(color_temp)
     finally:
-        if os.path.exists(temp_file_path):
-            os.remove(temp_file_path)
+        for path in (color_temp, paddle_temp):
+            if path and os.path.exists(path):
+                os.remove(path)
+
+    paddle_score = paddle_result.get('average_score') or 0.0
+    paddle_text = paddle_result.get('joined_text') or ''
+    char_score = char_result.get('average_score') or 0.0
+    char_text = char_result.get('joined_text') or ''
+    char_usable = char_result.get('available') and char_result.get('item_count', 0) > 0
+
+    if char_usable and (char_score + get_char_detector_bias() >= paddle_score or not paddle_text):
+        selected_text = char_text
+        selected_source = 'char_detector'
+        winning_items = char_result['items']
+        winning_score = char_score or None
+        winning_count = char_result['item_count']
+    else:
+        selected_text = paddle_text
+        selected_source = 'paddle' if paddle_text else None
+        winning_items = paddle_result.get('items', [])
+        winning_score = paddle_score or None
+        winning_count = paddle_result.get('item_count', 0)
 
     return {
         'plate_detected': True,
-        'selected_text': ocr_result['joined_text'],
-        'ocr': ocr_result,
+        'selected_text': selected_text,
+        'selected_source': selected_source,
+        'ocr': {
+            'joined_text': selected_text,
+            'items': winning_items,
+            'average_score': winning_score,
+            'item_count': winning_count,
+            'paddle': paddle_result,
+            'char_detector': char_result,
+        },
         'detection': {
             'message': detection_result['message'],
             'selected_box': detection_result['selected_box'],

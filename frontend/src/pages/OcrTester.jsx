@@ -102,9 +102,41 @@ export default function OcrTester() {
               <span>Avg OCR score</span>
               <strong>{formatScore(result?.average_score)}</strong>
             </div>
+            <div>
+              <span>Winning reader</span>
+              <strong>{result?.selected_source ? readerLabel(result.selected_source) : '—'}</strong>
+            </div>
           </div>
         </section>
       </section>
+
+      {result?.readers ? (
+        <section className="panel">
+          <div className="section-heading">
+            <div>
+              <span className="panel-kicker">Diagnostics</span>
+              <h2>Reader Comparison</h2>
+            </div>
+          </div>
+          <p style={{ marginTop: 0, color: 'var(--muted, #8a8a8a)' }}>
+            Both readers run on every capture; the higher-confidence result wins (with a small bias
+            toward the character detector since it is purpose-built for plate fonts).
+          </p>
+          <div className="hero-grid" style={{ marginTop: '1rem' }}>
+            <ReaderCard
+              title="Character detector (YOLO)"
+              reader={result.readers.char_detector}
+              isWinner={result.selected_source === 'char_detector'}
+              unavailableHint="Drop plate_char_detector.pt into backend/models/ and restart to enable."
+            />
+            <ReaderCard
+              title="PaddleOCR"
+              reader={result.readers.paddle}
+              isWinner={result.selected_source === 'paddle'}
+            />
+          </div>
+        </section>
+      ) : null}
 
       <section className="content-grid">
         <section className="panel media-panel">
@@ -128,5 +160,66 @@ export default function OcrTester() {
         )}
       </section>
     </>
+  );
+}
+
+function readerLabel(source) {
+  if (source === 'char_detector') return 'Character detector';
+  if (source === 'paddle') return 'PaddleOCR';
+  return source;
+}
+
+function ReaderCard({ title, reader, isWinner, unavailableHint }) {
+  const available = reader?.available !== false;
+  const items = reader?.items || [];
+  return (
+    <div className="panel" style={{ border: isWinner ? '2px solid var(--accent, #4caf50)' : undefined }}>
+      <div className="section-heading">
+        <div>
+          <span className="panel-kicker">{isWinner ? 'Winner' : 'Reader'}</span>
+          <h3 style={{ margin: 0 }}>{title}</h3>
+        </div>
+      </div>
+      {!available ? (
+        <div className="empty-state">
+          Not loaded. {unavailableHint || 'Model file missing on the backend.'}
+        </div>
+      ) : (
+        <>
+          <div className="selected-text-box" style={{ fontSize: '1.4rem' }}>
+            {reader?.joined_text || <em style={{ opacity: 0.6 }}>(no text)</em>}
+          </div>
+          <div className="summary-notes">
+            <div>
+              <span>Avg score</span>
+              <strong>{formatScore(reader?.average_score)}</strong>
+            </div>
+            <div>
+              <span>Items</span>
+              <strong>{reader?.item_count ?? 0}</strong>
+            </div>
+          </div>
+          {items.length ? (
+            <div style={{ marginTop: '0.75rem', display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+              {items.map((item, idx) => (
+                <span
+                  key={idx}
+                  title={`score: ${formatScore(item.score)}`}
+                  style={{
+                    padding: '0.2rem 0.5rem',
+                    border: '1px solid var(--border, #444)',
+                    borderRadius: 4,
+                    fontFamily: 'monospace',
+                    fontSize: '0.9rem',
+                  }}
+                >
+                  {item.text}
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </>
+      )}
+    </div>
   );
 }
